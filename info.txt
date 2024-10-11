@@ -1,0 +1,14 @@
+Passo a passo para executar os arquivos:
+
+1. Criar o ambiente virtual:
+- python -m venv .venv
+- .venv\Scripts\activate
+
+2. Instalar as bibliotecas:
+- pip install numpy astropy scipy opencv-python pandas tqdm
+
+3. Executar:
+- python .\preprocessamento.py
+
+4. Desativar o ambiente virtual:
+- deactivate
