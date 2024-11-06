@@ -1,42 +1,29 @@
-#MODELO C: MAIS COMPLEXO, DIFERENTES OTIMIZAÇÕES + FUNÇÕES DE ATIVAÇÃO + HIPERPARAMETROS
-
-import numpy as np
-import tensorflow as tf
 import logging
-import matplotlib.pyplot as plt
-from tqdm import tqdm
-from sklearn.utils import resample
-from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
-from astropy.io import fits
-import cv2
-import glob
 import os
-from imblearn.over_sampling import SMOTE
-from imblearn.under_sampling import RandomUnderSampler
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
-from sklearn.preprocessing import StandardScaler
 import time
 from concurrent.futures import ThreadPoolExecutor
-#from tensorflow_addons.optimizers import AdamW
-#from tensorflow.keras.optimizers import AdamW  # Adicionar esta linha
-from scikeras.wrappers import KerasClassifier
-#from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
-from sklearn.model_selection import train_test_split, GridSearchCV
+
+import cv2
+import glob
+import matplotlib.pyplot as plt
+import numpy as np
+import tensorflow as tf
+from astropy.io import fits
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
 from scipy.spatial import cKDTree
-
-
-class TimeHistory(tf.keras.callbacks.Callback):
-    def on_train_begin(self, logs={}):
-        self.times = []
-
-    def on_epoch_begin(self, epoch, logs={}):
-        self.epoch_time_start = time.time()
-
-    def on_epoch_end(self, epoch, logs={}):
-        self.times.append(time.time() - self.epoch_time_start)
-        
+from scikeras.wrappers import KerasClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.utils import resample
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.layers import LeakyReLU
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from skopt import gp_minimize
+from skopt.space import Real, Categorical, Integer
+from skopt.utils import use_named_args
+    
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -47,11 +34,10 @@ if gpus:
     try:
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
-        tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
-        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-        logger.info(f"{len(gpus)} Physical GPUs, {len(logical_gpus)} Logical GPUs")
+        tf.keras.mixed_precision.set_global_policy('mixed_float16')
+        logging.info("GPU habilitada para treinamento.")
     except RuntimeError as e:
-        logger.error(e)
+        logging.error(f"Erro ao configurar a GPU: {e}")
 
 # Data loading and preprocessing functions
 def carregar_imagem_fits(caminho_fits):
@@ -64,7 +50,6 @@ def carregar_imagem_fits(caminho_fits):
     except Exception as e:
         logger.error(f"Erro ao carregar imagem FITS: {e}")
         return None
-    
 
 def preprocess_image(image, target_size, output_dir):
     if image.ndim == 2:
@@ -78,54 +63,38 @@ def preprocess_image(image, target_size, output_dir):
 
     image = cv2.resize(image, target_size)
 
-    # --- Ajustes no pré-processamento ---
-    # 1. Conversão para escala de cinza
+    # Ajustes no pré-processamento
     image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    # 2. Remoção de ruído
-    image_gray = cv2.medianBlur(image_gray, 3)  # Aplicar filtro de mediana
-
-    # 3. Realce de bordas
-    image_gray = cv2.Canny(image_gray, 50, 150)  # Aplicar detector de bordas Canny
-
-    # 4. Equalização de histograma adaptativo (CLAHE)
+    image_gray = cv2.medianBlur(image_gray, 3)
+    image_gray = cv2.Canny(image_gray, 50, 150)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     image_clahe = clahe.apply(image_gray)
-
-    # 5. Normalização (escolha um dos métodos)
-    # image_norm = cv2.normalize(image_clahe, None, 0, 1, cv2.NORM_MINMAX, cv2.CV_32F)  # Normalização min-max
-    image_norm = cv2.normalize(image_clahe, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)  # Normalização min-max com valores em 0-255
-    image_norm = (image_norm - np.mean(image_norm)) / np.std(image_norm)  # Padronização z-score
-
-    # 6. Converter para uint8 antes de converter para RGB
+    image_norm = cv2.normalize(image_clahe, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+    image_norm = (image_norm - np.mean(image_norm)) / np.std(image_norm)
     image_norm = cv2.normalize(image_norm, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-
-    # 7. Conversão de volta para RGB (se necessário)
     image_processed = cv2.cvtColor(image_norm, cv2.COLOR_GRAY2BGR)
 
-    # --- Data augmentation ---
+    # Data augmentation
     data_gen = ImageDataGenerator(
-        rotation_range=60,  # Aumentado
-        width_shift_range=0.5,  # Aumentado
-        height_shift_range=0.5,  # Aumentado
-        shear_range=0.4,  # Aumentado
-        zoom_range=0.5,  # Aumentado
+        rotation_range=60,
+        width_shift_range=0.5,
+        height_shift_range=0.5,
+        shear_range=0.4,
+        zoom_range=0.5,
         horizontal_flip=True,
         vertical_flip=True,
-        brightness_range=[0.5, 1.5],  # Aumentado
-        channel_shift_range=0.4,  # Aumentado
+        brightness_range=[0.5, 1.5],
+        channel_shift_range=0.4,
         fill_mode='nearest'
     )
 
-    augmented_images = [data_gen.random_transform(image_processed) for _ in range(25)]  # Aumentado
+    augmented_images = [data_gen.random_transform(image_processed) for _ in range(25)]
 
     for i, aug_img in enumerate(augmented_images):
         augmented_path = os.path.join(output_dir, f'augmented_{i}.png')
         cv2.imwrite(augmented_path, aug_img * 255)
 
-    return image  # Retornar a imagem processada
-
-
+    return image
 
 def carregar_rotulos_metadados_fits(caminho_rotulos):
     try:
@@ -158,12 +127,12 @@ def carregar_metadados_antigos():
         return None
 
 def balancear_classes(X, y):
-    # --- Combinação de SMOTE e undersampling ---
+    # Combinação de SMOTE e undersampling
     over = SMOTE(sampling_strategy=0.8, random_state=42)
     under = RandomUnderSampler(sampling_strategy=1.0, random_state=42)
     X_resampled, y_resampled = over.fit_resample(X.reshape(X.shape[0], -1), y)
     X_resampled, y_resampled = under.fit_resample(X_resampled, y_resampled)
-    X_resampled = X_resampled.reshape(-1, 128, 128, 3)  # Ajuste o target_size aqui
+    X_resampled = X_resampled.reshape(-1, 128, 128, 3)
     return X_resampled, y_resampled
 
 def carregar_e_processar_imagem(args):
@@ -180,43 +149,30 @@ def distancia_angular(ra1, dec1, ra2, dec2):
     ra2_rad = np.radians(ra2, dtype=np.float64)
     dec2_rad = np.radians(dec2, dtype=np.float64)
 
-    # Calcular o argumento para np.arccos
-    arg_arccos = np.sin(dec1_rad) * np.sin(dec2_rad) + np.cos(dec1_rad) * np.cos(dec2_rad) * np.cos(
-        ra1_rad - ra2_rad)
-
-    # Ajustar o argumento para garantir que esteja dentro do intervalo válido
+    arg_arccos = np.sin(dec1_rad) * np.sin(dec2_rad) + np.cos(dec1_rad) * np.cos(dec2_rad) * np.cos(ra1_rad - ra2_rad)
     arg_arccos = np.clip(arg_arccos, -1, 1)
 
     return np.degrees(np.arccos(arg_arccos))
 
-def calcular_distancias_batch(ra1, dec1, metadados_antigos_escalados, batch_size=10000):
-    limite_distancia = 0.001  # Defina o valor dentro da função
+def calcular_distancias_batch(ra1, dec1, metadados_antigos_escalados, limite_distancia=0.001, batch_size=10000):
     ra1_rad = np.radians(ra1)
     dec1_rad = np.radians(dec1)
 
-    # Create a KD-Tree from the ra, dec coordinates of the old catalog
     kd_tree = cKDTree(np.column_stack((np.radians(metadados_antigos_escalados[:, 7]), np.radians(metadados_antigos_escalados[:, 8]))))
-
-    # Find the nearest neighbor index
     _, indices = kd_tree.query(np.column_stack((ra1_rad, dec1_rad)), k=1)
 
-    # Check if the distance is within the limit
     distances = distancia_angular(ra1, dec1, metadados_antigos_escalados[indices, 7], metadados_antigos_escalados[indices, 8])
     if np.all(distances <= limite_distancia):
         return indices
     else:
         return None
 
-# Função auxiliar para desempacotar os argumentos
 def calcular_distancias_unpack(args):
     return calcular_distancias_batch(*args)
 
-
 def criar_modelo(input_shape, num_metadados_imagem, num_metadados_antigos, learning_rate=0.001, dropout_rate=0.5, l2_reg=0.01):
-    # --- Entrada para as imagens ---
     input_imagem = tf.keras.Input(shape=input_shape)
 
-    # --- Bloco residual ---
     def bloco_residual(x, filtros, kernel_size=(3, 3)):
         y = tf.keras.layers.Conv2D(filtros, kernel_size, activation='elu', padding='same', kernel_regularizer=tf.keras.regularizers.l2(l2_reg))(x)
         y = tf.keras.layers.BatchNormalization()(y)
@@ -226,57 +182,62 @@ def criar_modelo(input_shape, num_metadados_imagem, num_metadados_antigos, learn
         y = tf.keras.layers.Activation('relu')(y)
         return y
 
-    # --- Camadas convolucionais com blocos residuais e dropout adicional ---
     x = tf.keras.layers.Conv2D(32, (3, 3), activation='elu', kernel_regularizer=tf.keras.regularizers.l2(l2_reg))(input_imagem)
     x = tf.keras.layers.BatchNormalization()(x)
     x = bloco_residual(x, 32)
     x = tf.keras.layers.MaxPooling2D((2, 2))(x)
-    x = tf.keras.layers.Dropout(dropout_rate)(x)  # Adicionar dropout
+    x = tf.keras.layers.Dropout(dropout_rate)(x)
 
     x = tf.keras.layers.Conv2D(64, (3, 3), activation='elu', kernel_regularizer=tf.keras.regularizers.l2(l2_reg))(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = bloco_residual(x, 64)
     x = tf.keras.layers.MaxPooling2D((2, 2))(x)
-    x = tf.keras.layers.Dropout(dropout_rate)(x)  # Adicionar dropout
+    x = tf.keras.layers.Dropout(dropout_rate)(x)
 
     x = tf.keras.layers.Conv2D(128, (3, 3), activation='relu', kernel_regularizer=tf.keras.regularizers.l2(l2_reg))(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = bloco_residual(x, 128)
     x = tf.keras.layers.MaxPooling2D((2, 2))(x)
-    x = tf.keras.layers.Dropout(dropout_rate)(x)  # Adicionar dropout
+    x = tf.keras.layers.Dropout(dropout_rate)(x)
 
     x = tf.keras.layers.Conv2D(256, (3, 3), activation='relu', kernel_regularizer=tf.keras.regularizers.l2(l2_reg))(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = bloco_residual(x, 256)
     x = tf.keras.layers.MaxPooling2D((2, 2))(x)
-    x = tf.keras.layers.Dropout(dropout_rate)(x)  # Adicionar dropout
+    x = tf.keras.layers.Dropout(dropout_rate)(x)
 
     x = tf.keras.layers.Flatten()(x)
 
-     # --- Entrada para os metadados da imagem ---
-    input_metadados_imagem = tf.keras.Input(shape=(num_metadados_imagem,))  # Usar todas as colunas
+    input_metadados_imagem = tf.keras.Input(shape=(num_metadados_imagem,))
+    input_metadados_antigos = tf.keras.Input(shape=(num_metadados_antigos,))
 
-    # --- Entrada para os metadados antigos ---
-    input_metadados_antigos = tf.keras.Input(shape=(num_metadados_antigos,))  # Usar todas as colunas
-    
-    # --- Concatenar as features ---
     x = tf.keras.layers.concatenate([x, input_metadados_imagem, input_metadados_antigos])
 
-    # --- Camadas densas ---
-    x = tf.keras.layers.Dense(1024, activation='LeakyReLU', kernel_regularizer=tf.keras.regularizers.l2(0.03))(x)  # Aumentar número de neurônios e regularização
+    x = tf.keras.layers.Dense(1024, activation=LeakyReLU(), kernel_regularizer=tf.keras.regularizers.l2(0.03))(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Dropout(0.7)(x)
 
-    # --- Camada de saída com opções de funções de ativação ---
-    output = tf.keras.layers.Dense(2, activation='softmax', dtype='float32')(x)  # softmax
-    #output = tf.keras.layers.Dense(2, activation='sigmoid', dtype='float32')(x)  # sigmoid
-    #output = tf.keras.layers.Dense(2, activation='linear', dtype='float32')(x)  # linear (para regressão)
+    output = tf.keras.layers.Dense(2, activation='softmax', dtype='float32')(x)
 
-    # --- Criar o modelo ---
+    # --- Opções de otimizadores ---
+    initial_learning_rate = learning_rate  # Usar learning_rate do argumento
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate,
+        decay_steps=10000,
+        decay_rate=0.96,
+        staircase=True) 
+
+    # Escolha um dos otimizadores abaixo:
+    optimizer = tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.9, nesterov=True)  # SGD com momentum e Nesterov momentum
+    # optimizer = AdamW(learning_rate=lr_schedule, weight_decay=1e-4)  # AdamW com weight decay
+
+    # Compile the model
     model = tf.keras.Model(inputs=[input_imagem, input_metadados_imagem, input_metadados_antigos], outputs=output)
+    model.compile(optimizer=optimizer, loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
     return model
 
-   
+
 def plot_matriz_confusao(y_true, y_pred):
     cm = confusion_matrix(y_true, y_pred)
     plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
@@ -288,7 +249,6 @@ def plot_matriz_confusao(y_true, y_pred):
     plt.ylabel('Rótulo verdadeiro')
     plt.xlabel('Rótulo previsto')
     plt.show()
-
 
 def plot_graficos_avaliacao(history):
     plt.figure(figsize=(12, 5))
@@ -312,6 +272,7 @@ def plot_graficos_avaliacao(history):
     plt.show()
 
 
+
 # Função para otimizar os hiperparâmetros do modelo usando GridSearchCV
 def otimizar_hiperparametros_grid(X_train_concatenado, y_train, num_metadados_imagem, num_metadados_antigos):
 
@@ -320,17 +281,19 @@ def otimizar_hiperparametros_grid(X_train_concatenado, y_train, num_metadados_im
     metadados_imagem_train = X_train_concatenado[:, 128*128*3:128*128*3+num_metadados_imagem]
     metadados_antigos_train = X_train_concatenado[:, 128*128*3+num_metadados_imagem:]
 
+    # --- Criar o modelo com a entrada para os metadados ---
+    melhores_parametros_grid = {'learning_rate': 0.001, 'dropout_rate': 0.05, 'l2_reg': 0.01, 'batch_size': 32, 'epochs': 50}  # Definir valores iniciais para os parâmetros
+
     def criar_modelo_otimizacao(learning_rate=0.001, dropout_rate=0.5, l2_reg=0.01):
-    # Criar o modelo com os parâmetros especificados
-        modelo = criar_modelo((128, 128, 3), num_metadados_imagem, num_metadados_antigos, learning_rate=learning_rate, dropout_rate=dropout_rate, l2_reg=l2_reg)  # Passar os parâmetros aqui
+        # Criar o modelo com os parâmetros especificados
+        modelo = criar_modelo((128, 128, 3), num_metadados_imagem, num_metadados_antigos, melhores_parametros_grid, learning_rate=learning_rate, dropout_rate=dropout_rate, l2_reg=l2_reg)
         return modelo
 
-    # Criar um classificador Keras
     classificador = KerasClassifier(
-        model=criar_modelo_otimizacao,  
-        learning_rate=0.001,  
-        dropout_rate=0.5,  
-        l2_reg=0.01,  
+        model=lambda: criar_modelo_otimizacao(melhores_parametros_grid),  # Lambda sem argumentos
+        learning_rate=0.001,  # Definir como parâmetro fixo
+        dropout_rate=0.5,  # Definir como parâmetro fixo
+        l2_reg=0.01,  # Definir como parâmetro fixo
         epochs=100,  
         batch_size=32,  
     )
@@ -338,8 +301,8 @@ def otimizar_hiperparametros_grid(X_train_concatenado, y_train, num_metadados_im
     # Definir os parâmetros a serem otimizados
     parametros = {
         'model__learning_rate': [0.001, 0.0001, 0.00001],  # Usar 'model__' como prefixo
-        'model__dropout_rate': [0.3, 0.5, 0.7], 
-        'model__l2_reg': [0.01, 0.02, 0.03],  
+        'model__dropout_rate': [0.3, 0.5, 0.7],
+        'model__l2_reg': [0.01, 0.02, 0.03],
         'epochs': [50, 100, 200]
     }
 
@@ -356,11 +319,8 @@ def otimizar_hiperparametros_grid(X_train_concatenado, y_train, num_metadados_im
 
 
 # Função para otimizar os hiperparâmetros do modelo usando otimização bayesiana
-def otimizar_hiperparametros_bayesiano(X_train, y_train, metadados_imagem_train, metadados_antigos_train):
-    from skopt import gp_minimize
-    from skopt.space import Real, Categorical, Integer
-    from skopt.utils import use_named_args
-
+def otimizar_hiperparametros_bayesiano(X_train, y_train, metadados_imagem_train, metadados_antigos_train, X_test, metadados_imagem_test, metadados_antigos_test, y_test):
+  
     # Definir o espaço de busca dos hiperparâmetros
     space  = [
         Real(1e-5, 1e-2, "log-uniform", name='learning_rate'),
@@ -372,24 +332,29 @@ def otimizar_hiperparametros_bayesiano(X_train, y_train, metadados_imagem_train,
 
     # Definir a função objetivo
     @use_named_args(space)
-    def objective(X_test, metadados_imagem_test, metadados_antigos_test, y_test, **params):
-        # Criar o modelo com os hiperparâmetros fornecidos
+    def objective(**params):
+        # Separar batch_size e epochs dos parâmetros do modelo
+        batch_size = params.pop('batch_size')
+        epochs = params.pop('epochs')
+
+        # Criar o modelo com os hiperparâmetros fornecidos (exceto batch_size e epochs)
         modelo = criar_modelo((128, 128, 3), metadados_imagem_train.shape[1], metadados_antigos_train.shape[1], **params)
 
         # Treinar o modelo
-        checkpoint = ModelCheckpoint('modelo_otimizacao.h5', monitor='val_loss', save_best_only=True, mode='min')
+        checkpoint = ModelCheckpoint('modeloC_bayesiano.keras', monitor='val_loss', save_best_only=True, mode='min')  # Alterar a extensão para .keras
         early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
-        
-        history = modelo.fit([X_train, metadados_imagem_train, metadados_antigos_train], y_train,
-                            validation_data=([X_test, metadados_imagem_test, metadados_antigos_test], y_test),
-                            epochs=params['epochs'],
-                            batch_size=params['batch_size'],
-                            callbacks=[early_stopping, checkpoint])
+        history = modelo.fit(
+            [X_train, metadados_imagem_train, metadados_antigos_train], y_train,
+            validation_data=([X_test, metadados_imagem_test, metadados_antigos_test], y_test),
+            epochs=epochs,  # Usar o número de épocas otimizado
+            batch_size=batch_size,  # Usar o tamanho do batch otimizado
+            callbacks=[early_stopping, checkpoint]
+        )
 
         # Retornar a perda na validação
         return history.history['val_loss'][-1]
-
+    
     # Executar a otimização bayesiana
     resultados_bayesiana = gp_minimize(objective, space, n_calls=50, random_state=42)
 
@@ -424,7 +389,7 @@ def main():
     metadados_imagem = metadados_imagem[rotulos_validos]
 
     # Convertendo rótulos para classes binárias
-    y = np.where(rotulos[:, 0] == 1, 0, 1) 
+    y = np.where(rotulos[:, 0] == 1, 0, 1)
 
     # --- Carregar e pré-processar os metadados antigos ---
     metadados_antigos = carregar_metadados_antigos()
@@ -436,17 +401,16 @@ def main():
     # --- Pré-processar os metadados antigos ---
     scaler = StandardScaler()
     metadados_antigos_escalados = scaler.fit_transform(metadados_antigos)
-    
+
     # --- Definir um limite de distância para considerar as galáxias como correspondentes (em graus) ---
     limite_distancia = 0.001  # Ajuste este valor
-    
-    
+
     # --- Calcular as distâncias em paralelo, em batches ---
     with ThreadPoolExecutor() as executor:
         indices_correspondentes = list(executor.map(calcular_distancias_unpack,
-                                             zip(metadados_imagem_escalados[:, 1],
-                                                 metadados_imagem_escalados[:, 2],
-                                                 [metadados_antigos_escalados] * len(metadados_imagem_escalados))))
+                                                zip(metadados_imagem_escalados[:, 0],  # Corrigido para usar a coluna 0 (ra)
+                                                    metadados_imagem_escalados[:, 1],  # Corrigido para usar a coluna 1 (dec)
+                                                    [metadados_antigos_escalados] * len(metadados_imagem_escalados))))
 
     # --- Filtrar a lista indices_correspondentes para remover os None ---
     indices_correspondentes = [indice for indice in indices_correspondentes if indice is not None]
@@ -461,7 +425,6 @@ def main():
     # Remodelar o array (ajuste conforme necessário):
     metadados_antigos_filtrados = metadados_antigos_filtrados.reshape(metadados_antigos_filtrados.shape[0], -1)  # Ajustar conforme necessário
     # Aplicar o StandardScaler:
-    metadados_antigos_escalados = scaler.fit_transform(metadados_antigos_filtrados)
     metadados_antigos_escalados = scaler.fit_transform(metadados_antigos_filtrados)
 
     # Balanceamento de classes (SMOTE + undersampling)
@@ -485,65 +448,28 @@ def main():
         metadados_antigos_resampled,
         test_size=0.2, random_state=42
     )
-    
-    # --- Otimizar os hiperparâmetros do modelo ---
-    # --- Concatenar as features de entrada ---
-    X_train_concatenado = np.concatenate((X_train.reshape(X_train.shape[0], -1), metadados_imagem_train, metadados_antigos_train), axis=1)
 
-    # --- Otimizar os hiperparâmetros do modelo usando GridSearchCV ---
-    # Definir os valores de num_metadados_imagem e num_metadados_antigos
-    num_metadados_imagem = metadados_imagem_train.shape[1]
-    num_metadados_antigos = metadados_antigos_train.shape[1]
-    
-    # Chamar a função passando os parâmetros adicionais
-    melhores_parametros_grid = otimizar_hiperparametros_grid(X_train_concatenado, y_train, num_metadados_imagem, num_metadados_antigos)
+    # Chamar a função de otimização bayesiana
+    melhores_parametros = otimizar_hiperparametros_bayesiano(X_train, y_train, metadados_imagem_train, metadados_antigos_train, X_test, metadados_imagem_test, metadados_antigos_test, y_test)
 
-
-    # Descomente a linha abaixo para usar a otimização bayesiana de hiperparâmetros
-    # melhores_parametros_bayesiana = otimizar_hiperparametros_bayesiano(X_train, y_train, metadados_imagem_train, metadados_antigos_train)
-
-    # --- Criar o modelo com a entrada para os metadados ---
+    # --- Criar o modelo com os melhores hiperparâmetros ---
     num_metadados_imagem = metadados_imagem.shape[1]
     num_metadados_antigos = metadados_antigos_filtrados.shape[1]
-    modelo = criar_modelo((128, 128, 3), **melhores_parametros_grid)  # Ajuste o target_size aqui
-
-    # --- Ajustes no treinamento ---
-    # --- Opções de otimizadores ---
-    initial_learning_rate = melhores_parametros_grid['learning_rate']
-    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-        initial_learning_rate,
-        decay_steps=10000,
-        decay_rate=0.96,
-        staircase=True)
-
-    # Escolha um dos otimizadores abaixo:
-    optimizer = tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.9, nesterov=True)  # SGD com momentum e Nesterov momentum
-    #optimizer = AdamW(learning_rate=lr_schedule, weight_decay=1e-4)  # AdamW com weight decay
-
-    #optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
-    #optimizer = tf.keras.optimizers.RMSprop(learning_rate=lr_schedule)
-    #optimizer = tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.9)
-
-    modelo.compile(optimizer=optimizer, loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    modelo = criar_modelo((128, 128, 3), num_metadados_imagem, num_metadados_antigos, **melhores_parametros)  # Passar os melhores parâmetros para o modelo
 
     # Treinamento
-    checkpoint = ModelCheckpoint('modeloC.h5', save_best_only=True, mode='min')
+    checkpoint = ModelCheckpoint('modeloC.h5', monitor='val_loss', save_best_only=True, mode='min')  # Alterar a extensão para .keras
     early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)
 
     logger.info('Iniciando o treinamento...')
-    time_callback = TimeHistory()
-
-    # --- Criar uma função para obter a taxa de aprendizado atual ---
-    #def get_lr(epoch):
-        #return tf.keras.backend.numpy(lr_schedule(epoch))  # Converter para valor numérico com tf.keras.backend.numpy()
 
     # --- Treinar o modelo com os melhores hiperparâmetros ---
     history = modelo.fit([X_train, metadados_imagem_train, metadados_antigos_train], y_train,
-                    validation_data=([X_test, metadados_imagem_test, metadados_antigos_test], y_test),
-                    epochs=melhores_parametros_grid['epochs'],  # Usar o número de épocas otimizado
-                    batch_size=melhores_parametros_grid['batch_size'],  # Usar o tamanho do batch otimizado
-                    callbacks=[early_stopping, reduce_lr, checkpoint])
+                        validation_data=([X_test, metadados_imagem_test, metadados_antigos_test], y_test),
+                        epochs=melhores_parametros['epochs'],  # Usar o número de épocas otimizado
+                        batch_size=melhores_parametros['batch_size'],  # Usar o tamanho do batch otimizado
+                        callbacks=[early_stopping, reduce_lr, checkpoint])
 
     logger.info('Treinamento finalizado')
 
