@@ -88,7 +88,7 @@ def preprocess_image(image, target_size, output_dir):
         fill_mode='nearest'
     )
 
-    augmented_images = [data_gen.random_transform(image_processed) for _ in range(25)]
+    augmented_images = [data_gen.random_transform(image_processed) for _ in range(35)]
 
     for i, aug_img in enumerate(augmented_images):
         augmented_path = os.path.join(output_dir, f'augmented_{i}.png')
@@ -213,7 +213,7 @@ def criar_modelo(input_shape, num_metadados_imagem, num_metadados_antigos, learn
 
     x = tf.keras.layers.concatenate([x, input_metadados_imagem, input_metadados_antigos])
 
-    x = tf.keras.layers.Dense(1024, activation=LeakyReLU(), kernel_regularizer=tf.keras.regularizers.l2(0.03))(x)
+    x = tf.keras.layers.Dense(1024, activation=tf.keras.layers.LeakyReLU(), kernel_regularizer=tf.keras.regularizers.l2(0.03))(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Dropout(0.7)(x)
 
@@ -227,11 +227,9 @@ def criar_modelo(input_shape, num_metadados_imagem, num_metadados_antigos, learn
         decay_rate=0.96,
         staircase=True) 
 
-    # Escolha um dos otimizadores abaixo:
     optimizer = tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.9, nesterov=True)  # SGD com momentum e Nesterov momentum
     # optimizer = AdamW(learning_rate=lr_schedule, weight_decay=1e-4)  # AdamW com weight decay
 
-    # Compile the model
     model = tf.keras.Model(inputs=[input_imagem, input_metadados_imagem, input_metadados_antigos], outputs=output)
     model.compile(optimizer=optimizer, loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
@@ -274,48 +272,48 @@ def plot_graficos_avaliacao(history):
 
 
 # Função para otimizar os hiperparâmetros do modelo usando GridSearchCV
-def otimizar_hiperparametros_grid(X_train_concatenado, y_train, num_metadados_imagem, num_metadados_antigos):
+#def otimizar_hiperparametros_grid(X_train_concatenado, y_train, num_metadados_imagem, num_metadados_antigos):
 
     # --- Extrair as features das imagens e dos metadados ---
-    X_train = X_train_concatenado[:, :128*128*3].reshape(-1, 128, 128, 3)  # Ajustar o target_size aqui
-    metadados_imagem_train = X_train_concatenado[:, 128*128*3:128*128*3+num_metadados_imagem]
-    metadados_antigos_train = X_train_concatenado[:, 128*128*3+num_metadados_imagem:]
+    #X_train = X_train_concatenado[:, :128*128*3].reshape(-1, 128, 128, 3)  # Ajustar o target_size aqui
+    #metadados_imagem_train = X_train_concatenado[:, 128*128*3:128*128*3+num_metadados_imagem]
+    #metadados_antigos_train = X_train_concatenado[:, 128*128*3+num_metadados_imagem:]
 
     # --- Criar o modelo com a entrada para os metadados ---
-    melhores_parametros_grid = {'learning_rate': 0.001, 'dropout_rate': 0.05, 'l2_reg': 0.01, 'batch_size': 32, 'epochs': 50}  # Definir valores iniciais para os parâmetros
+    #melhores_parametros_grid = {'learning_rate': 0.001, 'dropout_rate': 0.05, 'l2_reg': 0.01, 'batch_size': 32, 'epochs': 50}  # Definir valores iniciais para os parâmetros
 
-    def criar_modelo_otimizacao(learning_rate=0.001, dropout_rate=0.5, l2_reg=0.01):
+    #def criar_modelo_otimizacao(learning_rate=0.001, dropout_rate=0.5, l2_reg=0.01):
         # Criar o modelo com os parâmetros especificados
-        modelo = criar_modelo((128, 128, 3), num_metadados_imagem, num_metadados_antigos, melhores_parametros_grid, learning_rate=learning_rate, dropout_rate=dropout_rate, l2_reg=l2_reg)
-        return modelo
+        #modelo = criar_modelo((128, 128, 3), num_metadados_imagem, num_metadados_antigos, melhores_parametros_grid, learning_rate=learning_rate, dropout_rate=dropout_rate, l2_reg=l2_reg)
+        #return modelo
 
-    classificador = KerasClassifier(
-        model=lambda: criar_modelo_otimizacao(melhores_parametros_grid),  # Lambda sem argumentos
-        learning_rate=0.001,  # Definir como parâmetro fixo
-        dropout_rate=0.5,  # Definir como parâmetro fixo
-        l2_reg=0.01,  # Definir como parâmetro fixo
-        epochs=100,  
-        batch_size=32,  
-    )
+    #classificador = KerasClassifier(
+        #model=lambda: criar_modelo_otimizacao(melhores_parametros_grid),  # Lambda sem argumentos
+        #learning_rate=0.001,  # Definir como parâmetro fixo
+        #dropout_rate=0.5,  # Definir como parâmetro fixo
+       # l2_reg=0.01,  # Definir como parâmetro fixo
+        #epochs=100,  
+        #batch_size=32,  
+    #)
 
     # Definir os parâmetros a serem otimizados
-    parametros = {
-        'model__learning_rate': [0.001, 0.0001, 0.00001],  # Usar 'model__' como prefixo
-        'model__dropout_rate': [0.3, 0.5, 0.7],
-        'model__l2_reg': [0.01, 0.02, 0.03],
-        'epochs': [50, 100, 200]
-    }
+    #parametros = {
+        #'model__learning_rate': [0.001, 0.0001, 0.00001],  # Usar 'model__' como prefixo
+        #'model__dropout_rate': [0.3, 0.5, 0.7],
+       # 'model__l2_reg': [0.01, 0.02, 0.03],
+        #'epochs': [50, 100, 200]
+    #}
 
     # Criar o objeto GridSearchCV
-    grid = GridSearchCV(estimator=classificador, param_grid=parametros, scoring='accuracy', cv=3)
+    #grid = GridSearchCV(estimator=classificador, param_grid=parametros, scoring='accuracy', cv=3)
 
     # Ajustar o GridSearchCV aos dados de treinamento
-    grid_result = grid.fit(X_train_concatenado, y_train)  # Passar apenas X_train_concatenado e y_train
+    #grid_result = grid.fit(X_train_concatenado, y_train)  # Passar apenas X_train_concatenado e y_train
 
     # Imprimir os resultados
-    print("Melhor conjunto de parâmetros (Grid Search): %f usando %s" % (grid_result.best_score_, grid_result.best_params_))
+    #print("Melhor conjunto de parâmetros (Grid Search): %f usando %s" % (grid_result.best_score_, grid_result.best_params_))
 
-    return grid_result.best_params_
+    #return grid_result.best_params_
 
 
 # Função para otimizar os hiperparâmetros do modelo usando otimização bayesiana
@@ -356,7 +354,7 @@ def otimizar_hiperparametros_bayesiano(X_train, y_train, metadados_imagem_train,
         return history.history['val_loss'][-1]
     
     # Executar a otimização bayesiana
-    resultados_bayesiana = gp_minimize(objective, space, n_calls=50, random_state=42)
+    resultados_bayesiana = gp_minimize(objective, space, n_calls=5, random_state=42)
 
     # Imprimir os resultados
     print("Melhor conjunto de parâmetros (Otimização Bayesiana):", resultados_bayesiana.x)
@@ -449,27 +447,39 @@ def main():
         test_size=0.2, random_state=42
     )
 
+
     # Chamar a função de otimização bayesiana
     melhores_parametros = otimizar_hiperparametros_bayesiano(X_train, y_train, metadados_imagem_train, metadados_antigos_train, X_test, metadados_imagem_test, metadados_antigos_test, y_test)
 
     # --- Criar o modelo com os melhores hiperparâmetros ---
+    nomes_parametros = ['learning_rate', 'batch_size', 'epochs', 'l2_reg', 'dropout_rate']  # Nomes dos argumentos da função criar_modelo
+    melhores_parametros_dict = dict(zip(nomes_parametros, melhores_parametros))  # Converter a lista em um dicionário
+
+    ## Remover os parâmetros batch_size e epochs do dicionário para criar o modelo
+    batch_size = melhores_parametros_dict.pop('batch_size')
+    epochs = melhores_parametros_dict.pop('epochs')
+
     num_metadados_imagem = metadados_imagem.shape[1]
     num_metadados_antigos = metadados_antigos_filtrados.shape[1]
-    modelo = criar_modelo((128, 128, 3), num_metadados_imagem, num_metadados_antigos, **melhores_parametros)  # Passar os melhores parâmetros para o modelo
+    
+    # Criar o modelo com os parâmetros restantes
+    modelo = criar_modelo((128, 128, 3), num_metadados_imagem, num_metadados_antigos, **melhores_parametros_dict)
 
     # Treinamento
-    checkpoint = ModelCheckpoint('modeloC.h5', monitor='val_loss', save_best_only=True, mode='min')  # Alterar a extensão para .keras
+    checkpoint = ModelCheckpoint('modeloC.keras', monitor='val_loss', save_best_only=True, mode='min')  # Alterar a extensão para .keras
     early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)
 
     logger.info('Iniciando o treinamento...')
 
-    # --- Treinar o modelo com os melhores hiperparâmetros ---
-    history = modelo.fit([X_train, metadados_imagem_train, metadados_antigos_train], y_train,
-                        validation_data=([X_test, metadados_imagem_test, metadados_antigos_test], y_test),
-                        epochs=melhores_parametros['epochs'],  # Usar o número de épocas otimizado
-                        batch_size=melhores_parametros['batch_size'],  # Usar o tamanho do batch otimizado
-                        callbacks=[early_stopping, reduce_lr, checkpoint])
+    # Passar o batch_size e epochs para a função fit
+    history = modelo.fit(
+        [X_train, metadados_imagem_train, metadados_antigos_train], y_train,
+        validation_data=([X_test, metadados_imagem_test, metadados_antigos_test], y_test),
+        epochs=epochs,  # Usar o número de épocas otimizado
+        batch_size=batch_size,  # Usar o tamanho do batch otimizado
+        callbacks=[early_stopping, reduce_lr, checkpoint]
+    )
 
     logger.info('Treinamento finalizado')
 
