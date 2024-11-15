@@ -170,7 +170,7 @@ def calcular_distancias_batch(ra1, dec1, metadados_antigos_escalados, limite_dis
 def calcular_distancias_unpack(args):
     return calcular_distancias_batch(*args)
 
-def criar_modelo(input_shape, num_metadados_imagem, num_metadados_antigos, learning_rate=0.001, dropout_rate=0.5, l2_reg=0.01):
+def criar_modelo(input_shape, num_metadados_imagem, num_metadados_antigos, learning_rate, dropout_rate=0.5, l2_reg=0.01):
     input_imagem = tf.keras.Input(shape=input_shape)
 
     def bloco_residual(x, filtros, kernel_size=(3, 3)):
@@ -219,15 +219,18 @@ def criar_modelo(input_shape, num_metadados_imagem, num_metadados_antigos, learn
 
     output = tf.keras.layers.Dense(2, activation='softmax', dtype='float32')(x)
 
+
     # --- Opções de otimizadores ---
     initial_learning_rate = learning_rate  # Usar learning_rate do argumento
+    
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
         initial_learning_rate,
         decay_steps=10000,
         decay_rate=0.96,
-        staircase=True) 
+        staircase=True)
 
-    optimizer = tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.9, nesterov=True)  # SGD com momentum e Nesterov momentum
+    #optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     # optimizer = AdamW(learning_rate=lr_schedule, weight_decay=1e-4)  # AdamW com weight decay
 
     model = tf.keras.Model(inputs=[input_imagem, input_metadados_imagem, input_metadados_antigos], outputs=output)
@@ -338,23 +341,27 @@ def otimizar_hiperparametros_bayesiano(X_train, y_train, metadados_imagem_train,
         # Criar o modelo com os hiperparâmetros fornecidos (exceto batch_size e epochs)
         modelo = criar_modelo((128, 128, 3), metadados_imagem_train.shape[1], metadados_antigos_train.shape[1], **params)
 
+        # *** ESSA LINHA É ESSENCIAL: ***
+        modelo.optimizer.learning_rate = params['learning_rate'] 
+        
         # Treinar o modelo
         checkpoint = ModelCheckpoint('modeloC_bayesiano.keras', monitor='val_loss', save_best_only=True, mode='min')  # Alterar a extensão para .keras
         early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
 
         history = modelo.fit(
             [X_train, metadados_imagem_train, metadados_antigos_train], y_train,
             validation_data=([X_test, metadados_imagem_test, metadados_antigos_test], y_test),
             epochs=epochs,  # Usar o número de épocas otimizado
             batch_size=batch_size,  # Usar o tamanho do batch otimizado
-            callbacks=[early_stopping, checkpoint]
+            callbacks=[early_stopping, checkpoint, reduce_lr]
         )
 
         # Retornar a perda na validação
         return history.history['val_loss'][-1]
     
     # Executar a otimização bayesiana
-    resultados_bayesiana = gp_minimize(objective, space, n_calls=5, random_state=42)
+    resultados_bayesiana = gp_minimize(objective, space, n_calls=12, random_state=42)
 
     # Imprimir os resultados
     print("Melhor conjunto de parâmetros (Otimização Bayesiana):", resultados_bayesiana.x)
