@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 import optuna
 from optuna.integration import KerasPruningCallback
 from optuna.trial import TrialState
+from sklearn.ensemble import RandomForestRegressor
+from optuna.samplers import TPESampler
 import cv2
 import glob
 import matplotlib.pyplot as plt
@@ -276,30 +278,40 @@ def plot_graficos_avaliacao(history):
     plt.show()
     
     
-# Função para otimizar os hiperparâmetros do modelo usando Optuna com modelo surrogate
+# Função para otimizar os hiperparâmetros do modelo usando Optuna
 def otimizar_hiperparametros_optuna(X_train, y_train, metadados_imagem_train, metadados_antigos_train, X_test, metadados_imagem_test, metadados_antigos_test, y_test):
     def objective(trial):
         # Hiperparâmetros a serem otimizados
         learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-3, log=True)
-        batch_size = trial.suggest_int('batch_size', 32, 128)  # Diminuir o intervalo para batch_size
-        epochs = trial.suggest_int('epochs', 50, 200)  # Diminuir ainda mais o intervalo para epochs
-        l2_reg = trial.suggest_float('l2_reg', 0.01, 0.05, log=True)  # Diminuir o intervalo para l2_reg
-        dropout_rate = trial.suggest_float('dropout_rate', 0.2, 0.5)  # Diminuir o intervalo para dropout_rate
+        batch_size = trial.suggest_int('batch_size', 32, 128)
+        epochs = trial.suggest_int('epochs', 50, 500)
+        l2_reg = trial.suggest_float('l2_reg', 0.01, 0.05, log=True)
+        dropout_rate = trial.suggest_float('dropout_rate', 0.2, 0.5)
+        
+        
 
         # Criar o modelo
-        modelo = criar_modelo((128, 128, 3), metadados_imagem_train.shape[1], metadados_antigos_train.shape[1], 
-                             learning_rate=learning_rate, dropout_rate=dropout_rate, l2_reg=l2_reg)
-        
-        #modelo.optimizer.learning_rate = ['learning_rate'] 
+        modelo = criar_modelo(
+            (128, 128, 3),
+            metadados_imagem_train.shape[1],
+            metadados_antigos_train.shape[1], 
+            learning_rate=learning_rate,
+            dropout_rate=dropout_rate,
+            l2_reg=l2_reg
+        )
 
         # Callbacks para Early Stopping e Pruning
-        early_stopping = EarlyStopping(monitor='val_loss', patience=5)  # Diminuir patience para Early Stopping
+        early_stopping = EarlyStopping(monitor='val_loss', patience=5)
         pruning_callback = KerasPruningCallback(trial, monitor='val_loss')
 
         # Treinar o modelo
         history = modelo.fit(
-            [X_train, metadados_imagem_train, metadados_antigos_train], y_train,
-            validation_data=([X_test, metadados_imagem_test, metadados_antigos_test], y_test),
+            [X_train, metadados_imagem_train, metadados_antigos_train],
+            y_train,
+            validation_data=(
+                [X_test, metadados_imagem_test, metadados_antigos_test],
+                y_test
+            ),
             epochs=epochs,
             batch_size=batch_size,
             callbacks=[early_stopping, pruning_callback]
@@ -308,20 +320,19 @@ def otimizar_hiperparametros_optuna(X_train, y_train, metadados_imagem_train, me
         # Retornar a perda na validação
         return history.history['val_loss'][-1]
 
-    # Criar um estudo Optuna com modelo surrogate e pruning mais agressivo
-    study = optuna.create_study(direction='minimize', 
-                                sampler=optuna.samplers.TPESampler(multivariate=True, seed=42),
-                                pruner=optuna.pruners.SuccessiveHalvingPruner(
-                                    min_resource=1, 
-                                    reduction_factor=4, 
-                                    min_early_stopping_rate=0
-                                ))
-
-    # Definir o modelo surrogate (opcional)
-    model_surrogate = RandomForestRegressor()  # Descomentar se quiser usar modelo surrogate
+    # Criar um estudo Optuna
+    study = optuna.create_study(
+        direction='minimize',
+        sampler=optuna.samplers.TPESampler(multivariate=True, seed=42),
+        pruner=optuna.pruners.SuccessiveHalvingPruner(
+            min_resource=1,
+            reduction_factor=4,
+            min_early_stopping_rate=0
+        )
+    )
 
     # Otimizar o estudo
-    study.optimize(objective, n_trials=10, n_jobs=-1, model_surrogate=model_surrogate)
+    study.optimize(objective, n_trials=10, n_jobs=-1)
 
     # Imprimir os resultados
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
@@ -434,14 +445,17 @@ def main():
     )
 
     # --- Criar o modelo com os melhores hiperparâmetros ---
-    # (Remova batch_size e epochs daqui, pois eles não são usados na criação do modelo)
+    batch_size = melhores_parametros['batch_size']  
+    epochs = melhores_parametros['epochs']  
+
+    melhores_parametros.pop('batch_size')  
+    melhores_parametros.pop('epochs')  
+
+    
     modelo = criar_modelo((128, 128, 3), metadados_imagem_train.shape[1], metadados_antigos_train.shape[1], 
                          **melhores_parametros)  
 
     # --- Treinar o modelo final ---
-    # (Use batch_size e epochs aqui)
-    batch_size = melhores_parametros['batch_size']
-    epochs = melhores_parametros['epochs']
 
     checkpoint = ModelCheckpoint('modelo_C_Optuna.keras', monitor='val_loss', save_best_only=True, mode='min')
     early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
