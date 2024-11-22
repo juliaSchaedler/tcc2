@@ -29,7 +29,7 @@ def remove_missing_values(data):
     logging.info(f'Valores vazios removidos: {len(df) - len(df_clean)}')
     return df_clean
 
-# Função para normalizar os dados (somente nas colunas que estão presentes)
+# Função para normalizar os dados 
 def normalize_data(df, columns):
     logging.info('Normalizando dados...')
     cols_to_normalize = ['pE', 'pS', 'MAG_AUTO_I', 'DNF_ZMEAN_SOF']
