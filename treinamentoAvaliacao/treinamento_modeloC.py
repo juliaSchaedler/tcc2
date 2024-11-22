@@ -221,7 +221,7 @@ def criar_modelo(input_shape, num_metadados_imagem, num_metadados_antigos, learn
 
 
     # --- Opções de otimizadores ---
-    initial_learning_rate = learning_rate  # Usar learning_rate do argumento
+    initial_learning_rate = learning_rate  
     
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
         initial_learning_rate,
@@ -338,22 +338,20 @@ def otimizar_hiperparametros_bayesiano(X_train, y_train, metadados_imagem_train,
         batch_size = params.pop('batch_size')
         epochs = params.pop('epochs')
 
-        # Criar o modelo com os hiperparâmetros fornecidos (exceto batch_size e epochs)
+        
         modelo = criar_modelo((128, 128, 3), metadados_imagem_train.shape[1], metadados_antigos_train.shape[1], **params)
-
-        # *** ESSA LINHA É ESSENCIAL: ***
         modelo.optimizer.learning_rate = params['learning_rate'] 
         
         # Treinar o modelo
-        checkpoint = ModelCheckpoint('modeloC_bayesiano.keras', monitor='val_loss', save_best_only=True, mode='min')  # Alterar a extensão para .keras
+        checkpoint = ModelCheckpoint('modeloC_bayesiano.keras', monitor='val_loss', save_best_only=True, mode='min')  
         early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
         reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
 
         history = modelo.fit(
             [X_train, metadados_imagem_train, metadados_antigos_train], y_train,
             validation_data=([X_test, metadados_imagem_test, metadados_antigos_test], y_test),
-            epochs=epochs,  # Usar o número de épocas otimizado
-            batch_size=batch_size,  # Usar o tamanho do batch otimizado
+            epochs=epochs,  
+            batch_size=batch_size,  
             callbacks=[early_stopping, checkpoint, reduce_lr]
         )
 
@@ -408,13 +406,13 @@ def main():
     metadados_antigos_escalados = scaler.fit_transform(metadados_antigos)
 
     # --- Definir um limite de distância para considerar as galáxias como correspondentes (em graus) ---
-    limite_distancia = 0.001  # Ajuste este valor
+    limite_distancia = 0.001  
 
     # --- Calcular as distâncias em paralelo, em batches ---
     with ThreadPoolExecutor() as executor:
         indices_correspondentes = list(executor.map(calcular_distancias_unpack,
-                                                zip(metadados_imagem_escalados[:, 0],  # Corrigido para usar a coluna 0 (ra)
-                                                    metadados_imagem_escalados[:, 1],  # Corrigido para usar a coluna 1 (dec)
+                                                zip(metadados_imagem_escalados[:, 0],  
+                                                    metadados_imagem_escalados[:, 1],  
                                                     [metadados_antigos_escalados] * len(metadados_imagem_escalados))))
 
     # --- Filtrar a lista indices_correspondentes para remover os None ---
@@ -428,8 +426,7 @@ def main():
     # Verificar o formato do array:
     print(f"Formato original: {metadados_antigos_filtrados.shape}")
     # Remodelar o array (ajuste conforme necessário):
-    metadados_antigos_filtrados = metadados_antigos_filtrados.reshape(metadados_antigos_filtrados.shape[0], -1)  # Ajustar conforme necessário
-    # Aplicar o StandardScaler:
+    metadados_antigos_filtrados = metadados_antigos_filtrados.reshape(metadados_antigos_filtrados.shape[0], -1)  
     metadados_antigos_escalados = scaler.fit_transform(metadados_antigos_filtrados)
 
     # Balanceamento de classes (SMOTE + undersampling)
@@ -459,8 +456,8 @@ def main():
     melhores_parametros = otimizar_hiperparametros_bayesiano(X_train, y_train, metadados_imagem_train, metadados_antigos_train, X_test, metadados_imagem_test, metadados_antigos_test, y_test)
 
     # --- Criar o modelo com os melhores hiperparâmetros ---
-    nomes_parametros = ['learning_rate', 'batch_size', 'epochs', 'l2_reg', 'dropout_rate']  # Nomes dos argumentos da função criar_modelo
-    melhores_parametros_dict = dict(zip(nomes_parametros, melhores_parametros))  # Converter a lista em um dicionário
+    nomes_parametros = ['learning_rate', 'batch_size', 'epochs', 'l2_reg', 'dropout_rate']  
+    melhores_parametros_dict = dict(zip(nomes_parametros, melhores_parametros))  
 
     ## Remover os parâmetros batch_size e epochs do dicionário para criar o modelo
     batch_size = melhores_parametros_dict.pop('batch_size')
@@ -473,7 +470,7 @@ def main():
     modelo = criar_modelo((128, 128, 3), num_metadados_imagem, num_metadados_antigos, **melhores_parametros_dict)
 
     # Treinamento
-    checkpoint = ModelCheckpoint('modeloC.keras', monitor='val_loss', save_best_only=True, mode='min')  # Alterar a extensão para .keras
+    checkpoint = ModelCheckpoint('modeloC.keras', monitor='val_loss', save_best_only=True, mode='min')  
     early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)
 
@@ -483,15 +480,15 @@ def main():
     history = modelo.fit(
         [X_train, metadados_imagem_train, metadados_antigos_train], y_train,
         validation_data=([X_test, metadados_imagem_test, metadados_antigos_test], y_test),
-        epochs=epochs,  # Usar o número de épocas otimizado
-        batch_size=batch_size,  # Usar o tamanho do batch otimizado
+        epochs=epochs,  
+        batch_size=batch_size,  
         callbacks=[early_stopping, reduce_lr, checkpoint]
     )
 
     logger.info('Treinamento finalizado')
 
     # Avaliação
-    y_pred = np.argmax(modelo.predict([X_test, metadados_imagem_test, metadados_antigos_test]), axis=-1)  # Predição com imagens e metadados
+    y_pred = np.argmax(modelo.predict([X_test, metadados_imagem_test, metadados_antigos_test]), axis=-1)  
     plot_matriz_confusao(y_test, y_pred)
     plot_graficos_avaliacao(history)
 
