@@ -15,7 +15,7 @@ from sklearn.ensemble import IsolationForest
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from tensorflow.keras.models import load_model
 
-# Usando o backend Qt5Agg para matplotlib
+
 matplotlib.use('Qt5Agg')
 
 
@@ -24,13 +24,12 @@ def carregar_rotulos(fits_file):
     with fits.open(fits_file) as hdul:
         data = hdul[1].data
 
-        # Cria um dicionário para os rótulos
+        
         rotulos = {}
 
         for i in range(len(data)):
-            nome_imagem = data[i]['filename']  # Obtém o nome da imagem
-
-            # Define os rótulos com base nos valores das colunas
+            nome_imagem = data[i]['filename']  
+           
             if data[i]['SPIRAL'] == 1:
                 rotulos[nome_imagem] = 'ESPIRAL'
             elif data[i]['ELLIPTICAL'] == 1:
@@ -55,35 +54,31 @@ def carregar_modelo(caminho_modelo):
 def carregar_imagem(caminho_imagem, colorido=False):
     """Carrega uma imagem FITS ou de outro formato."""
     if caminho_imagem.endswith('.fits'):
-        # Usa astropy para ler a imagem FITS
+       
         with fits.open(caminho_imagem) as hdul:
             img_data = hdul[0].data
             if img_data is None:
                 return None
 
-            # Normaliza a imagem para o intervalo [0, 255]
+            
             img_data = (img_data - np.min(img_data)) / (np.max(img_data) - np.min(img_data)) * 255
             img_data = img_data.astype(np.uint8)
 
-            # Se precisar de uma imagem colorida
+           
             if colorido:
-                # Converte para RGB, assumindo que a imagem é grayscale
                 img_data = cv2.cvtColor(img_data, cv2.COLOR_GRAY2BGR)
 
             return img_data
     else:
-        # Se não for FITS, converte para FITS
         try:
             img_array = plt.imread(caminho_imagem)
-
-            # Converte o array NumPy para um objeto FITS
+          
             hdu = fits.PrimaryHDU(img_array)  
             
-            # Cria um header FITS básico
             hdr = fits.Header()
             hdu.header = hdr
 
-            img = hdu  # Atribui o objeto FITS à variável img
+            img = hdu  
 
             return img
         except Exception as e:
@@ -98,58 +93,52 @@ def prever_classes(modelo, diretorio_imagens, rotulos_verdadeiros):
     imagens = []
     predicoes = []
     nomes_imagens = []
-
-    # Limita o número de imagens a 9 para evitar sobrecarga
     max_imagens = 9
     contador = 0
 
-    # Limiar de confiança para prever uma classe
-    threshold = 0.9  # Ajuste conforme necessário
+   
+    threshold = 0.9 
 
     for imagem_nome in os.listdir(diretorio_imagens):
         if contador >= max_imagens:
             break
 
         caminho_imagem = os.path.join(diretorio_imagens, imagem_nome)
-        img = carregar_imagem(caminho_imagem)  # Carrega a imagem
-
+        img = carregar_imagem(caminho_imagem)  
         if img is not None:
-            # Converte a imagem para FITS, se necessário
             if isinstance(img, np.ndarray):
                 hdu = fits.PrimaryHDU(img)
                 hdr = fits.Header()
                 hdu.header = hdr
-                img = hdu  # Atribui o objeto FITS à variável img
+                img = hdu  
 
-            # Redimensiona a imagem para 128x128
+
             if isinstance(img, np.ndarray):
                 img_resized = cv2.resize(img, (128, 128))
             else:
                 img_resized = cv2.resize(img.data, (128, 128))
 
-            # Converte para RGB (3 canais)
+           
             img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_GRAY2BGR)
 
-            # Normaliza os valores de pixel
+           
             img_rgb = img_rgb.astype(np.float32) / 255.0
 
-            # Verifica se a imagem é colorida (3 canais) ou não (1 canal)
+            
             if img_rgb.ndim == 3 and img_rgb.shape[2] == 3:
-                # Para imagens RGB, o corte pode ser feito manualmente sem usar Cutout2D
-                # Faz o corte diretamente na imagem RGB
+               
                 y_center, x_center = img_rgb.shape[0] // 2, img_rgb.shape[1] // 2
-                cutout = img_rgb[y_center - 32:y_center + 32, x_center - 32:x_center + 32]  # Exemplo de corte 64x64
+                cutout = img_rgb[y_center - 32:y_center + 32, x_center - 32:x_center + 32]  
             else:
-                # Caso a imagem seja em escala de cinza ou outro formato, trata-se sem o Cutout2D
+               
                 img_rgb = cv2.resize(img_rgb, (64, 64))
 
-            # Adiciona a imagem à lista
+           
             imagens.append(cutout)
 
-            # Realiza a predição
+            
             pred = modelo.predict(np.expand_dims(cutout, axis=0))
-            probabilidade_maxima = np.max(pred)  # Probabilidade da classe mais provável
-
+            probabilidade_maxima = np.max(pred)  
             # Se a probabilidade máxima for maior que o limiar, predecemos a classe
             if probabilidade_maxima > threshold:
                 predicao_classe = np.argmax(pred, axis=1)[0]
@@ -163,7 +152,7 @@ def prever_classes(modelo, diretorio_imagens, rotulos_verdadeiros):
             # Exibe as probabilidades das classes
             print(f"Imagem: {imagem_nome}, Probabilidades: {pred[0]}, Classe Prevista: {predicao_classe}")
 
-    # Visualiza as imagens com previsões e rótulos verdadeiros
+    
     nrows = int(np.ceil(len(imagens) / 3))
     ncols = 3
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 5 * nrows))
@@ -173,8 +162,8 @@ def prever_classes(modelo, diretorio_imagens, rotulos_verdadeiros):
         col = i % ncols
         ax = axes[row, col]
 
-        # Redimensiona a imagem antes de exibir
-        ax.imshow(img, cmap='gray')  # Ajustado para exibir imagens em escala de cinza
+        
+        ax.imshow(img, cmap='gray')  
         rotulo_verdadeiro = rotulos_verdadeiros.get(nome_imagem, "Desconhecido")
         legenda_pred = "ELÍPTICA" if pred == 1 else "ESPIRAL" if pred == 0 else "Incerta"
         ax.set_title(f'Predição: {legenda_pred}, Rótulo: {rotulo_verdadeiro}')
@@ -197,8 +186,6 @@ def visualizar_imagens_colorida(diretorio_imagens):
     """
     imagens_fits = []
     rotulos = []
-
-    # Limita o número de imagens a 9 para evitar sobrecarga
     max_imagens = 9
     contador = 0
 
@@ -211,7 +198,7 @@ def visualizar_imagens_colorida(diretorio_imagens):
 
         if img_fits is not None:
             imagens_fits.append(img_fits)
-            rotulos.append(imagem_nome)  # Use o nome da imagem como rótulo
+            rotulos.append(imagem_nome)  
             contador += 1
 
     n_imagens = len(imagens_fits)
@@ -224,36 +211,36 @@ def visualizar_imagens_colorida(diretorio_imagens):
         col = i % ncols
         ax = axes[row, col]
 
-        # Normaliza a imagem para o intervalo [0, 255]
+       
         img_normalizada = cv2.normalize(img_fits, None, 0, 255, cv2.NORM_MINMAX)
 
-        # Converte a imagem para RGB usando um mapa de cores
+       
         img_rgb = cv2.applyColorMap(img_normalizada.astype(np.uint8), cv2.COLORMAP_JET)
 
         ax.imshow(img_rgb)
         ax.set_title(f'Rótulo: {rotulo}')
         ax.axis('off')
 
-    # Desativa eixos vazios
+   
     for j in range(len(imagens_fits), nrows * ncols):
         fig.delaxes(axes.flatten()[j])
 
     plt.tight_layout()
     plt.show()
     
-def prever_brilho(magnitudes):  # Adaptada para receber um array multidimensional
+def prever_brilho(magnitudes):  
     """
     Prediz o brilho futuro usando suavização exponencial (multi-banda).
     """
-    # Ajusta o modelo para cada banda
+  
     previsoes = []
-    for i in range(magnitudes.shape[1]):  # Itera sobre as colunas (bandas)
+    for i in range(magnitudes.shape[1]):  
         modelo_brilho = ExponentialSmoothing(magnitudes[:, i], trend="add", seasonal=None)
         ajuste_brilho = modelo_brilho.fit()
         previsoes_banda = ajuste_brilho.forecast(10)
         previsoes.append(previsoes_banda)
 
-    return np.array(previsoes).T  # Retorna um array com as previsões para cada banda
+    return np.array(previsoes).T 
 
 
 def detectar_anomalias(dados):
@@ -262,14 +249,14 @@ def detectar_anomalias(dados):
     """
     modelo_anomalias = IsolationForest(contamination=0.1, random_state=42)
     
-    # Ajusta o modelo para cada banda (se necessário)
-    if dados.ndim > 1:  # Verifica se é multidimensional
-        predicoes_anomalias = np.zeros(dados.shape[0])  # Inicializa array de predições
+  
+    if dados.ndim > 1: 
+        predicoes_anomalias = np.zeros(dados.shape[0])  
         for i in range(dados.shape[1]):
             dados_banda = dados[:, i].reshape(-1, 1)
             predicoes_banda = modelo_anomalias.fit_predict(dados_banda)
-            predicoes_anomalias += predicoes_banda  # Combina as predições de cada banda
-        predicoes_anomalias = np.sign(predicoes_anomalias)  # Normaliza para -1 ou 1
+            predicoes_anomalias += predicoes_banda  
+        predicoes_anomalias = np.sign(predicoes_anomalias) 
     else:
         dados = np.array(dados).reshape(-1, 1)
         predicoes_anomalias = modelo_anomalias.fit_predict(dados)
@@ -353,21 +340,20 @@ def plotar_grafico_brilho(brilhos_observados, previsoes_brilho):
     Plota o gráfico do brilho observado e previsto.
     """
     n_bandas = previsoes_brilho.shape[1]
-    cores = ['red', 'green', 'blue', 'purple', 'orange']  # Cores para as bandas
-    plt.figure(figsize=(10, 6))  # Aumenta o tamanho da figura
+    cores = ['red', 'green', 'blue', 'purple', 'orange'] 
+    plt.figure(figsize=(10, 6))  
 
     plt.plot(brilhos_observados, label='Brilho Observado', color='blue')
 
     for i in range(n_bandas):
         plt.plot(range(len(brilhos_observados), len(brilhos_observados) + len(previsoes_brilho)), 
                  previsoes_brilho[:, i], label=f'Brilho Previsto (Banda {chr(ord("G") + i)})', 
-                 color=cores[i], linestyle='--', marker='o', markersize=3)  # Adiciona marcadores
-
+                 color=cores[i], linestyle='--', marker='o', markersize=3)  
     plt.legend()
     plt.title("Previsão do Brilho (Multi-Banda)")
     plt.xlabel("Tempo")
     plt.ylabel("Brilho")
-    plt.ylim(-19, -13)  # Ajusta os limites do eixo Y
+    plt.ylim(-19, -13)  
     plt.show()
     
 
@@ -375,34 +361,34 @@ def executar_pipeline(arquivo_fits, diretorio_imagens, caminho_modelo_cnn, arqui
     """
     Executa o pipeline completo de mineração de dados.
     """
-    # Carregar modelo
+    
     modelo = carregar_modelo(caminho_modelo_cnn)
     if not modelo:
         return
 
-    # Carregar rótulos reais
+    
     rotulos_reais = carregar_rotulos(arquivo_fits)
 
-    # Prever classes das galáxias
+  
     imagens, predicoes = prever_classes(modelo, diretorio_imagens, rotulos_reais)
     exibir_imagens_rotulos(imagens, rotulos_reais, predicoes)
 
-    # Visualizar imagens coloridas
+   
     visualizar_imagens_colorida(diretorio_imagens)
 
-    # Previsão do brilho (usando múltiplas bandas)
+   
     with fits.open(arquivo_fits) as hdul:
         data = hdul[1].data
         df_metadados = pd.DataFrame(data)
         print(df_metadados.columns)
 
     magnitudes = df_metadados[['mag_auto_g', 'mag_auto_r', 'mag_auto_i']].values
-    magnitudes = -magnitudes  # Inverte os valores (opcional)
+    magnitudes = -magnitudes  
 
     previsoes_brilho = prever_brilho(magnitudes)
 
-    # Plota o gráfico (chama a função plotar_grafico_brilho)
-    plotar_grafico_brilho(magnitudes[:, 0], previsoes_brilho)  # Passa a primeira banda como observado
+   
+    plotar_grafico_brilho(magnitudes[:, 0], previsoes_brilho)  
 
     plt.figure()
     plt.plot(magnitudes, label='Brilho Observado')
@@ -414,7 +400,7 @@ def executar_pipeline(arquivo_fits, diretorio_imagens, caminho_modelo_cnn, arqui
     plt.ylabel("Brilho")
     plt.show()
 
-    # Detecção de anomalias
+    
     anomalias = detectar_anomalias(magnitudes)
     plt.figure()
     plt.plot(magnitudes[:, 0], label='Brilho (Banda G)')  # Plota a banda G como referência
@@ -425,23 +411,22 @@ def executar_pipeline(arquivo_fits, diretorio_imagens, caminho_modelo_cnn, arqui
     plt.ylabel("Brilho")
     plt.show()
 
-    # Análise de clusters (corrigido)
+   
     analisar_clusters(df_metadados[['mag_auto_g', 'mass']])
 
-    # Mapeia os índices das classes para os nomes
     classes = {0: 'ESPIRAL', 1: 'ELÍPTICA'}  
 
-    # Converte os rótulos previstos para strings
+   
     rotulos_previstos_str = [classes[pred] for pred in predicoes]
 
-    # Exibe o relatório de classificação (corrigido)
+   
     exibir_relatorio_classificacao(rotulos_reais, rotulos_previstos_str)
 
-# Caminhos dos arquivos (atualize conforme necessário)
+
 arquivo_fits = 'desY1stripe82_GZ1_ES.fits'
 diretorio_imagens = 'img_DESY1_stripe82_GZ1/img_DESY1_stripe82_GZ1'
 caminho_modelo_cnn = 'modeloB.h5'
 arquivo_metadados = 'datasets_processados/dataset_preprocessado.fits'
 
-# Executar o pipeline
+
 executar_pipeline(arquivo_fits, diretorio_imagens, caminho_modelo_cnn, arquivo_metadados)
