@@ -51,7 +51,6 @@ def carregar_imagem_fits(caminho_fits):
         logging.error(f"Erro ao carregar imagem FITS: {e}")
         return None
     
-# Funções auxiliares (mantidas)
 
 def preprocess_image(image, target_size, output_dir):
     if image.ndim == 2:
@@ -74,9 +73,9 @@ def preprocess_image(image, target_size, output_dir):
         shear_range=0.2,
         zoom_range=0.2,
         horizontal_flip=True,
-        vertical_flip=True,  # Novo
-        brightness_range=[0.8, 1.2],  # Novo
-        channel_shift_range=0.1,  # Novo
+        vertical_flip=True,  
+        brightness_range=[0.8, 1.2],  
+        channel_shift_range=0.1,  
         fill_mode='nearest'
     )
 
@@ -138,13 +137,13 @@ def criar_modelo(input_shape):
     model = tf.keras.models.Sequential([
         base_model,
         tf.keras.layers.Flatten(),
-        tf.keras.layers.Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l1_l2(0.001)),  # L1 e L2
+        tf.keras.layers.Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l1_l2(0.001)),  
         tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.Dropout(0.5),  # Aumento do Dropout
+        tf.keras.layers.Dropout(0.5),  
 
         tf.keras.layers.Dense(64, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001)),
         tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.Dropout(0.5),  # Aumento do Dropout
+        tf.keras.layers.Dropout(0.5),  
 
         tf.keras.layers.Dense(2, activation='softmax', dtype='float32')
     ])
