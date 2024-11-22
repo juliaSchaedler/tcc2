@@ -226,7 +226,7 @@ def criar_modelo(input_shape, num_metadados_imagem, num_metadados_antigos, learn
 
 
     # --- Opções de otimizadores ---
-    initial_learning_rate = learning_rate  # Usar learning_rate do argumento
+    initial_learning_rate = learning_rate  
     
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
         initial_learning_rate,
@@ -367,7 +367,7 @@ def main():
     with ThreadPoolExecutor() as executor:
         X = list(executor.map(carregar_e_processar_imagem, [(caminho_fits, caminho_saida_imagens) for caminho_fits in caminhos_fits]))
 
-    X = np.array([x for x in X if x is not None])  # Remover os None (imagens que não foram carregadas)
+    X = np.array([x for x in X if x is not None]) 
 
     rotulos, metadados_imagem = carregar_rotulos_metadados_fits('desY1stripe82_GZ1_ES.fits')
 
@@ -392,13 +392,12 @@ def main():
     metadados_antigos_escalados = scaler.fit_transform(metadados_antigos)
 
     # --- Definir um limite de distância para considerar as galáxias como correspondentes (em graus) ---
-    limite_distancia = 0.001  # Ajuste este valor
-
+    limite_distancia = 0.001  
     # --- Calcular as distâncias em paralelo, em batches ---
     with ThreadPoolExecutor() as executor:
         indices_correspondentes = list(executor.map(calcular_distancias_unpack,
-                                                    zip(metadados_imagem_escalados[:, 0],  # Corrigido para usar a coluna 0 (ra)
-                                                        metadados_imagem_escalados[:, 1],  # Corrigido para usar a coluna 1 (dec)
+                                                    zip(metadados_imagem_escalados[:, 0], 
+                                                        metadados_imagem_escalados[:, 1], 
                                                         [metadados_antigos_escalados] * len(metadados_imagem_escalados))))
 
     # --- Filtrar a lista indices_correspondentes para remover os None ---
@@ -409,11 +408,10 @@ def main():
 
     # --- Pré-processar os metadados antigos ---
     scaler = StandardScaler()
-    # Verificar o formato do array:
+  
     print(f"Formato original: {metadados_antigos_filtrados.shape}")
-    # Remodelar o array (ajuste conforme necessário):
-    metadados_antigos_filtrados = metadados_antigos_filtrados.reshape(metadados_antigos_filtrados.shape[0], -1)  # Ajustar conforme necessário
-    # Aplicar o StandardScaler:
+    
+    metadados_antigos_filtrados = metadados_antigos_filtrados.reshape(metadados_antigos_filtrados.shape[0], -1)   
     metadados_antigos_escalados = scaler.fit_transform(metadados_antigos_filtrados)
 
     # Balanceamento de classes (SMOTE + undersampling)
@@ -475,14 +473,14 @@ def main():
 
 
     # Avaliação
-    y_pred = np.argmax(modelo.predict([X_test, metadados_imagem_test, metadados_antigos_test]), axis=-1)  # Predição com imagens e metadados
+    y_pred = np.argmax(modelo.predict([X_test, metadados_imagem_test, metadados_antigos_test]), axis=-1)  
     plot_matriz_confusao(y_test, y_pred)
     plot_graficos_avaliacao(history)
 
     print(classification_report(y_test, y_pred, target_names=["Espiral", "Elíptica"]))
 
     # --- Avaliação do pré-processamento ---
-    # 1. Visualização das imagens:
+   
     def visualizar_imagens(X_original, X_preprocessado, num_imagens=5):
         plt.figure(figsize=(12, 4))
         for i in range(num_imagens):
@@ -497,10 +495,10 @@ def main():
             plt.axis('off')
         plt.show()
 
-    # Visualizar algumas imagens originais e pré-processadas
+    
     visualizar_imagens(X, X_resampled)
 
-    # 2. Analisar a distribuição dos pixels:
+    
     def plotar_histograma_pixels(imagens):
         plt.figure(figsize=(8, 6))
         plt.hist(imagens.ravel(), bins=256, range=(0, 1), density=True)
@@ -509,7 +507,7 @@ def main():
         plt.title('Histograma dos valores dos pixels')
         plt.show()
 
-    # Plotar o histograma dos pixels das imagens pré-processadas
+    
     plotar_histograma_pixels(X_resampled)
 
 if __name__ == '__main__':
